@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?><unload unload_date="2024-06-25 10:02:01"><sys_remote_update_set action="INSERT_OR_UPDATE"><application display_value="Global">global</application><application_name>Global</application_name><application_scope>global</application_scope><application_version/><collisions/><commit_date/><deleted/><description>Automatically created by the system</description><inserted/><name>Default 1</name><origin_sys_id/><parent/><release_date/><remote_base_update_set/><remote_parent_id/><remote_sys_id>a40eff3c97c3021026c8b6fce053af87</remote_sys_id><state>loaded</state><summary/><sys_class_name>sys_remote_update_set</sys_class_name><sys_created_by>admin</sys_created_by><sys_created_on>2024-06-25 10:02:01</sys_created_on><sys_id>6b2e7bfc97c3021026c8b6fce053af1c</sys_id><sys_mod_count>0</sys_mod_count><sys_updated_by>admin</sys_updated_by><sys_updated_on>2024-06-25 10:02:01</sys_updated_on><update_set/><update_source/><updated/></sys_remote_update_set><sys_update_xml action="INSERT_OR_UPDATE"><action>INSERT_OR_UPDATE</action><application display_value="Global">global</application><category>customer</category><comments/><name>sys_script_include_846d83f49703021026c8b6fce053af0f</name><payload>&lt;?xml version="1.0" encoding="UTF-8"?&gt;&lt;record_update table="sys_script_include"&gt;&lt;sys_script_include action="INSERT_OR_UPDATE"&gt;&lt;access&gt;package_private&lt;/access&gt;&lt;active&gt;true&lt;/active&gt;&lt;api_name&gt;global.GitHubUtils&lt;/api_name&gt;&lt;caller_access/&gt;&lt;client_callable&gt;false&lt;/client_callable&gt;&lt;description/&gt;&lt;name&gt;GitHubUtils&lt;/name&gt;&lt;script&gt;&lt;![CDATA[var GitHubUtils = Class.create();
+GitHubUtils.prototype = {
+    initialize: function() {
+        var GITHUB_TOKEN = '';
+        var GITHUB_REPO = '';
+    },
+
+    copyUpdateSet: function(sysid) {
+        // Get current update set
+        var updateSet = new GlideRecord("sys_update_set");
+        updateSet.get(sysid);
+
+        // Copy the update set to the retrieved update set table
+        var retrievedUpdateSet = new GlideRecord('sys_remote_update_set');
+        retrievedUpdateSet.initialize();
+        retrievedUpdateSet.description = updateSet.description;
+        retrievedUpdateSet.name = updateSet.name;
+        retrievedUpdateSet.release_date = updateSet.release_date;
+        retrievedUpdateSet.remote_sys_id = updateSet.sys_id;
+        retrievedUpdateSet.application = updateSet.application;
+        // Add scope information if needed
+        var scopeGr = new GlideRecord('sys_scope');
+        scopeGr.get(updateSet.application);
+        if (scopeGr.isValid()) {
+            retrievedUpdateSet.application_name = scopeGr.name;
+            retrievedUpdateSet.application_scope = scopeGr.scope;
+            retrievedUpdateSet.application_version = scopeGr.version;
+        }
+        retrievedUpdateSet.state = "loaded";
+
+        var returnid = retrievedUpdateSet.insert();
+
+        // Now iterate through all the customer updates from the original update set and create copies assigned to the new update set
+        var custUpdate = new GlideRecord('sys_update_xml');
+        custUpdate.addQuery('update_set', updateSet.sys_id);
+        custUpdate.query();
+        while (custUpdate.next()) {
+            custUpdate.remote_update_set = returnid;
+            custUpdate.update_set = '';
+            custUpdate.insert();
+        }
+        return returnid;
+    },
+
+
+
+
+    getUpdateSetPayload: function(sysid) {
+        // Start building the XML output
+        var outputStart = "&lt;?xml version=\"1.0\" encoding=\"UTF-8\"?&gt;";
+        var unloadTag = "&lt;unload unload_date=\"" + GlideSysDateUtil.getUMTDateTimeString() + "\"&gt;";
+        var unloadClose = "&lt;/unload&gt;";
+
+        // Add a cleaned up payload of the update set record itself
+        var updateSetGR = new GlideRecord("sys_remote_update_set");
+        updateSetGR.get(sysid);
+        var xml = new GlideRecordXMLSerializer();
+        var updateSet = new String(xml.serialize(updateSetGR))
+        updateSet = this.cleanXMLBlock(updateSet);
+
+        var output = outputStart + unloadTag + updateSet;
+
+        // Add cleaned up payloads of the all the customer updates
+        var custUpdateGR = new GlideRecord("sys_update_xml");
+        custUpdateGR.addQuery("remote_update_set", updateSetGR.sys_id);
+        custUpdateGR.query();
+        while (custUpdateGR.next()) {
+            var xmlString = new GlideRecordXMLSerializer();
+            var custUpdate = new String(xmlString.serialize(custUpdateGR));
+            custUpdate = this.cleanXMLBlock(custUpdate);
+            output += custUpdate;
+        }
+        output += unloadClose;
+        return output;
+    },
+
+
+    cleanXMLBlock: function(xmlString) {
+        try {
+            xmlString = xmlString.replace(/&lt;\?.*\?&gt;&lt;sys_remote_update_set&gt;/g, "&lt;sys_remote_update_set action=\"INSERT_OR_UPDATE\"&gt;");
+            xmlString = xmlString.replace(/&lt;\?.*\?&gt;&lt;sys_update_xml&gt;/g, "&lt;sys_update_xml action=\"INSERT_OR_UPDATE\"&gt;");
+        } catch (e) {}
+        return xmlString;
+    },
+
+    deleteUpdateSet: function(sysid) {
+        var gr = new GlideRecord("sys_remote_update_set");
+        if (gr.get(sysid)) {
+            gr.deleteRecord();
+        }
+    },
+
+    copyAndExtract: function(sysid) {
+        var tempSysId = this.copyUpdateSet(sysid);
+        var output = this.getUpdateSetPayload(tempSysId);
+        this.deleteUpdateSet(tempSysId);
+        return output;
+    },
+
+    backupUpdateSet: function(sysid, name) {
+        var fileName = gs.getProperty("instance_name") + "-" + sysid + ".xml";
+        var updateSetContents = this.copyAndExtract(sysid);
+        this.uploadFile(fileName, updateSetContents, name);
+    },
+
+    loadProperties: function() {
+        this.GITHUB_TOKEN = gs.getProperty('github.token');
+        this.GITHUB_REPO = gs.getProperty('github.repo');
+        if (this.GITHUB_TOKEN == '' || this.GITHUB_REPO == '') {
+            gs.addErrorMessage("You need to set the values of system properties mentioned below.\ngithub.token\ngithub.repo");
+        }
+
+    },
+
+    process: function(sys_id) {
+        this.loadProperties();
+        // Iterate through filtered list of update sets
+        var updateSet = new GlideRecord("sys_update_set");
+        updateSet.get(sys_id);
+        this.backupUpdateSet(updateSet.sys_id, updateSet.name);
+
+    },
+
+    uploadFile: function(fileName, fileContents, fileDescription) {
+        var sha = this.getSHA(fileName);
+        var restMessage = new sn_ws.RESTMessageV2();
+        //restMessage.setBasicAuth(this.GHUSER, this.GHPWD);
+        restMessage.setHttpMethod("put");
+        restMessage.setRequestHeader('Authorization', 'Bearer ' + this.GITHUB_TOKEN);
+        restMessage.setEndpoint("https://api.github.com/repos/" + this.GITHUB_REPO + "/contents/" + fileName);
+        var util = new GlideStringUtil();
+        var encodedContents = util.base64Encode(fileContents);
+        // Note we are building the request body as a string, as setStringParameter seems to run into issues with the GitHub REST API
+        var reqBody = "\"path\" : \"" + fileName + "\", \"message\" : \"" + fileDescription + "\", \"content\" : \"" + encodedContents + "\"";
+        if (sha) reqBody += ", \"sha\" : \"" + sha + "\"";
+        restMessage.setRequestBody("{" + reqBody + "}");
+        var response = restMessage.execute();
+        var body = response.getBody();
+        var parser = new JSON();
+        var bodyObj = parser.decode(body);
+        if (JSUtil.nil(bodyObj.content.sha)) {
+            return false;
+        } else {
+            return bodyObj.content.sha;
+        }
+    },
+
+
+    getSHA: function(fileName) {
+        var restMessage = new sn_ws.RESTMessageV2();
+        restMessage.setRequestHeader('Authorization', 'Bearer ' + this.GITHUB_TOKEN);
+
+        //restMessage.setBasicAuth(this.GHUSER, this.GHPWD);
+        restMessage.setHttpMethod("get");
+        restMessage.setEndpoint("https://api.github.com/repos/" + this.GITHUB_REPO + "/contents/" + fileName);
+        var response = restMessage.execute();
+        var body = response.getBody();
+        var parser = new JSON();
+        var bodyObj = parser.decode(body);
+        if (JSUtil.nil(bodyObj.sha)) {
+            return false;
+        } else {
+            return bodyObj.sha;
+        }
+    },
+
+    type: 'GitHubUttils'
+};]]&gt;&lt;/script&gt;&lt;sys_class_name&gt;sys_script_include&lt;/sys_class_name&gt;&lt;sys_created_by&gt;admin&lt;/sys_created_by&gt;&lt;sys_created_on&gt;2024-06-25 06:33:39&lt;/sys_created_on&gt;&lt;sys_id&gt;846d83f49703021026c8b6fce053af0f&lt;/sys_id&gt;&lt;sys_mod_count&gt;10&lt;/sys_mod_count&gt;&lt;sys_name&gt;GitHubUtils&lt;/sys_name&gt;&lt;sys_package display_value="Global" source="global"&gt;global&lt;/sys_package&gt;&lt;sys_policy/&gt;&lt;sys_scope display_value="Global"&gt;global&lt;/sys_scope&gt;&lt;sys_update_name&gt;sys_script_include_846d83f49703021026c8b6fce053af0f&lt;/sys_update_name&gt;&lt;sys_updated_by&gt;admin&lt;/sys_updated_by&gt;&lt;sys_updated_on&gt;2024-06-25 10:01:17&lt;/sys_updated_on&gt;&lt;/sys_script_include&gt;&lt;/record_update&gt;</payload><payload_hash>1876101266</payload_hash><remote_update_set display_value="Default 1">6b2e7bfc97c3021026c8b6fce053af1c</remote_update_set><replace_on_upgrade>false</replace_on_upgrade><sys_created_by>admin</sys_created_by><sys_created_on>2024-06-25 10:02:01</sys_created_on><sys_id>e32e7bfc97c3021026c8b6fce053af1d</sys_id><sys_mod_count>0</sys_mod_count><sys_recorded_at>1904ed7b3330000001</sys_recorded_at><sys_updated_by>admin</sys_updated_by><sys_updated_on>2024-06-25 10:02:01</sys_updated_on><table/><target_name>GitHubUtils</target_name><type>Script Include</type><update_domain>global</update_domain><update_guid>fc0eff3c24c302109c9ef9166813ea88</update_guid><update_guid_history>fc0eff3c24c302109c9ef9166813ea88:1876101266,e62cbf384cc302108efcc9166848e18e:-556741111,9fbc9ff42d430210a993843026335fb7:1548491304,bc0c5f301a430210a979154d76f9b04a:-1545638190,fadb9b347a43021030b5cd60aa412d33:1823680738,93ab17b07b43021030a882f8d8b24673:1394071192,c3c9dbf0c44302102f59fa8d95ab64c8:1086927601,bbd753fc23030210faa71ccee0056fe2:1235005798,49f19ff8de0302106bb0ac6260927231:-1841290935,e2a193f4a60302102d79c7cca266cce1:-1146514828,5f7e83f4940302107e4ea137ff169255:1267722488</update_guid_history><update_set/><view/></sys_update_xml></unload>
